@@ -1,10 +1,20 @@
 import { FaArrowLeft, FaArrowRight, FaGithub, FaLinkedinIn } from "react-icons/fa6";
+import type { IconType } from "react-icons";
+import DotPortraitDemo from "./pages/DotPortraitDemo";
 import { profile } from "./profile";
 
-const socialIcons = {
+const socialIcons: Record<"GitHub" | "LinkedIn", IconType> = {
   GitHub: FaGithub,
-  LinkedIn: FaLinkedinIn
+  LinkedIn: FaLinkedinIn,
 };
+
+function getSocialIcon(label: string): IconType | undefined {
+  if (label in socialIcons) {
+    return socialIcons[label as keyof typeof socialIcons];
+  }
+
+  return undefined;
+}
 
 function Header() {
   return (
@@ -35,7 +45,10 @@ function Header() {
 function SocialRail() {
   return (
     <aside className="social-rail" aria-label="Social links">
-      {profile.socialLinks.map((link) => (
+      {profile.socialLinks.map((link) => {
+        const Icon = getSocialIcon(link.label);
+
+        return (
         <a
           key={link.label}
           href={link.href}
@@ -43,16 +56,16 @@ function SocialRail() {
           rel="noreferrer"
           aria-label={link.label}
           title={link.label}
-          className={socialIcons[link.label] ? "social-icon-link" : undefined}
+          className={Icon ? "social-icon-link" : undefined}
         >
-          {socialIcons[link.label] ? (() => {
-            const Icon = socialIcons[link.label];
-            return <Icon aria-hidden="true" focusable="false" />;
-          })() : (
+          {Icon ? (
+            <Icon aria-hidden="true" focusable="false" />
+          ) : (
             link.short
           )}
         </a>
-      ))}
+        );
+      })}
     </aside>
   );
 }
@@ -193,7 +206,12 @@ function LaptopScreen() {
   );
 }
 
-function PhoneScreen({ size = "large", variant = "grid" }) {
+interface PhoneScreenProps {
+  size?: "large" | "small" | "narrow";
+  variant?: "grid" | "list";
+}
+
+function PhoneScreen({ size = "large", variant = "grid" }: PhoneScreenProps) {
   const items = Array.from({ length: variant === "list" ? 5 : 6 }, (_, index) => index);
 
   return (
@@ -263,6 +281,10 @@ function ProjectShowcase() {
 }
 
 export default function App() {
+  if (window.location.hash === "#dot-portrait-demo") {
+    return <DotPortraitDemo />;
+  }
+
   return (
     <div className="app-shell">
       <Header />
