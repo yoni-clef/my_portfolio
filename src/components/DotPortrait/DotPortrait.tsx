@@ -17,7 +17,7 @@ export default function DotPortrait({
   minDotRadius = 0.15,
   contrast = 1,
   dotColor = "#000000",
-  backgroundColor = "#ffffff",
+  backgroundColor = "#ffffffff",
   glitchColor = "#00ff41",
   className,
   mouseInteraction = true,
