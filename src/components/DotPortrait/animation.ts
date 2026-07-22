@@ -1,7 +1,7 @@
 import type { DotData, RenderOptions } from "./types";
-import type { GlitchConfig } from "./mouseInteraction";
-import { applyGlitch } from "./mouseInteraction";
-import { clearCanvas, renderFrame, setupCanvas } from "./renderer";
+import type { PhysicsConfig } from "./physics";
+import { tickAllDots } from "./physics";
+import { clearCanvas, renderDots, setupCanvas } from "./renderer";
 
 export interface AnimationState {
     rafId: number | null;
@@ -10,23 +10,17 @@ export interface AnimationState {
 export interface AnimationConfig {
     canvas: HTMLCanvasElement;
     dots: DotData[];
-    glitch: GlitchConfig;
-    /** Lerp speed toward glitch targets per frame (0–1). */
-    transitionSpeed: number;
+    physics: PhysicsConfig;
     renderOptions: Required<Pick<RenderOptions, "dotColor" | "backgroundColor">> &
     Pick<RenderOptions, "width" | "height">;
+    /** Returns the current logical mouse position, or null when outside. */
     getMouse: () => { x: number | null; y: number | null; active: boolean };
 }
 
 /**
- * Lerp the glitch overlay properties toward their targets.
- * Base properties (x, y, originalRadius) are never written.
+ * Start the requestAnimationFrame loop.
+ * Returns an AnimationState whose `rafId` can be cancelled via stopAnimation().
  */
-function tickDot(dot: DotData, transitionSpeed: number): void {
-    dot.glitchOpacity += (dot.targetOpacity - dot.glitchOpacity) * transitionSpeed;
-    dot.glitchRadiusDelta += (dot.targetRadiusDelta - dot.glitchRadiusDelta) * transitionSpeed;
-}
-
 export function startAnimation(config: AnimationConfig): AnimationState {
     const state: AnimationState = { rafId: null };
 
@@ -39,17 +33,10 @@ export function startAnimation(config: AnimationConfig): AnimationState {
     const loop = () => {
         const { x, y, active } = config.getMouse();
 
-        // 1. Compute new glitch targets based on cursor
-        applyGlitch(config.dots, config.glitch, x, y, active);
+        tickAllDots(config.dots, config.physics, x, y, active);
 
-        // 2. Lerp each dot toward its target
-        for (const dot of config.dots) {
-            tickDot(dot, config.transitionSpeed);
-        }
-
-        // 3. Render
         clearCanvas(ctx);
-        renderFrame(ctx, config.dots, config.renderOptions);
+        renderDots(ctx, config.dots, config.renderOptions);
 
         state.rafId = requestAnimationFrame(loop);
     };
@@ -58,6 +45,9 @@ export function startAnimation(config: AnimationConfig): AnimationState {
     return state;
 }
 
+/**
+ * Cancel the running animation loop.
+ */
 export function stopAnimation(state: AnimationState): void {
     if (state.rafId !== null) {
         cancelAnimationFrame(state.rafId);
