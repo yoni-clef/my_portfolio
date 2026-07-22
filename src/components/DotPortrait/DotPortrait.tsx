@@ -20,16 +20,18 @@ export default function DotPortrait({
   backgroundColor = "#ffffffff",
   glitchColor = "#00ff41",
   className,
+  // Phase 2 physics props
   mouseInteraction = true,
   interactionRadius = 120,
-  interactionStrength = 0.18,
-  glitchIntensity = 0.85,
-  transitionSpeed = 0.1,
+  interactionStrength = 0.8,
+  springStrength = 0.08,
+  friction = 0.85,
 }: DotPortraitProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const resultRef = useRef<ImageProcessingResult | null>(null);
   const animationRef = useRef<AnimationState | null>(null);
 
+  // Logical mouse position in canvas coordinates (null = outside canvas)
   const mouseRef = useRef<{ x: number | null; y: number | null; active: boolean }>({
     x: null,
     y: null,
@@ -43,6 +45,7 @@ export default function DotPortrait({
 
     const onMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
+      // Map from CSS pixels to logical canvas coordinates
       const scaleX = width / rect.width;
       const scaleY = height / rect.height;
       mouseRef.current = {
@@ -58,6 +61,7 @@ export default function DotPortrait({
 
     canvas.addEventListener("mousemove", onMove);
     canvas.addEventListener("mouseleave", onLeave);
+
     return () => {
       canvas.removeEventListener("mousemove", onMove);
       canvas.removeEventListener("mouseleave", onLeave);
@@ -71,12 +75,13 @@ export default function DotPortrait({
 
     let cancelled = false;
 
+    // Stop any previous loop before starting a new one
     if (animationRef.current) {
       stopAnimation(animationRef.current);
       animationRef.current = null;
     }
 
-    const run = async () => {
+    const processAndAnimate = async () => {
       try {
         const result = await processImage(image, {
           width,
@@ -88,26 +93,40 @@ export default function DotPortrait({
         });
 
         if (cancelled || canvasRef.current !== canvas) return;
+
         resultRef.current = result;
 
         if (mouseInteraction) {
+          // Start physics-driven animation loop
           animationRef.current = startAnimation({
             canvas,
             dots: result.dots,
-            glitch: { interactionRadius, interactionStrength, glitchIntensity, glitchColor },
-            transitionSpeed,
-            renderOptions: { width, height, dotColor, backgroundColor },
+            physics: {
+              springStrength,
+              friction,
+              interactionRadius,
+              interactionStrength,
+            },
+            renderOptions: {
+              width,
+              height,
+              dotColor,
+              backgroundColor,
+            },
             getMouse: () => mouseRef.current,
           });
         } else {
+          // Static render — no animation needed
           renderPortrait(canvas, result, { width, height, dotColor, backgroundColor });
         }
-      } catch (err) {
-        if (!cancelled) console.error("[DotPortrait]", err);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("[DotPortrait] Failed to render portrait:", error);
+        }
       }
     };
 
-    void run();
+    void processAndAnimate();
 
     return () => {
       cancelled = true;
@@ -117,20 +136,34 @@ export default function DotPortrait({
       }
     };
   }, [
-    image, width, height, dotSpacing, maxDotRadius, minDotRadius, contrast,
-    dotColor, backgroundColor, glitchColor,
-    mouseInteraction, interactionRadius, interactionStrength, glitchIntensity, transitionSpeed,
+    image,
+    width,
+    height,
+    dotSpacing,
+    maxDotRadius,
+    minDotRadius,
+    contrast,
+    dotColor,
+    backgroundColor,
+    mouseInteraction,
+    interactionRadius,
+    interactionStrength,
+    springStrength,
+    friction,
   ]);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
+
     return () => {
       if (animationRef.current) {
         stopAnimation(animationRef.current);
         animationRef.current = null;
       }
-      if (canvas) disposeCanvas(canvas);
+      if (canvas) {
+        disposeCanvas(canvas);
+      }
       resultRef.current = null;
     };
   }, []);
@@ -143,7 +176,7 @@ export default function DotPortrait({
       <canvas
         ref={canvasRef}
         aria-label="Interactive halftone dot portrait"
-        style={{ display: "block", width: "100%", height: "100%" }}
+        style={{ display: "block", width: "100%", height: "100%", cursor: mouseInteraction ? "none" : "default" }}
       />
     </div>
   );
