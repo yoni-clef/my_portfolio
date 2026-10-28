@@ -1,4 +1,11 @@
-import { useState, lazy, Suspense } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  lazy,
+  Suspense,
+} from "react";
 import {
   FaArrowLeft,
   FaArrowRight,
@@ -26,34 +33,261 @@ const socialIcons: Record<string, IconType> = {
   Telegram: FaTelegram,
   Gmail: FaEnvelope,
 };
-
 function getSocialIcon(label: string): IconType | undefined {
   return socialIcons[label];
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// MOTION HOOKS  (recipes from design/reference/motion/README.md)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Recipe 9: header hides on scroll-down, reveals on scroll-up ──────────────
+// Trigger: scroll; property: transform; curve: cubic-bezier(0.22,1,0.36,1) 180ms
+function useHeaderHide() {
+  const [hidden, setHidden] = useState(false);
+  const lastY = useRef(0);
+
+  useEffect(() => {
+    function onScroll() {
+      const y = window.scrollY;
+      const delta = y - lastY.current;
+      if (delta > 4 && y > 80) setHidden(true);   // scrolling down → hide
+      else if (delta < -4) setHidden(false);        // scrolling up  → reveal
+      lastY.current = y;
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  return hidden;
+}
+
+// ── Recipe 9 (nav active): active section highlight 150ms cubic-bezier ────────
+function useActiveSection(ids: string[]): string {
+  const [active, setActive] = useState(ids[0] ?? "");
+
+  useEffect(() => {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible.length) setActive(visible[0].target.id);
+      },
+      { threshold: 0.25 }
+    );
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) obs.observe(el);
+    });
+    return () => obs.disconnect();
+  }, [ids]);
+
+  return active;
+}
+
+// ── Recipes 21 & 22: typewriter + text-scramble on heading span ───────────────
+// Recipe 21: plain typewriter (one char at a time)
+// Recipe 22: scramble — show final text with unsettled letters as random chars,
+//            settling left-to-right, one more letter every few frames (~50ms)
+
+const SCRAMBLE_CHARS = "!<>-_\\/[]{}—=+*^?#&%@$";
+
+function useScrambleText(target: string, active: boolean): string {
+  const [display, setDisplay] = useState(target);
+  const frame = useRef(0);
+  const settled = useRef(0);
+  const raf = useRef(0);
+
+  const scramble = useCallback(() => {
+    frame.current++;
+    // settle one letter every 3 frames (~50ms at 60fps)
+    if (frame.current % 3 === 0 && settled.current < target.length) {
+      settled.current++;
+    }
+    const out = target
+      .split("")
+      .map((ch, i) => {
+        if (ch === " ") return " ";
+        if (i < settled.current) return ch;
+        return SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)];
+      })
+      .join("");
+    setDisplay(out);
+    if (settled.current < target.length) {
+      raf.current = requestAnimationFrame(scramble);
+    } else {
+      setDisplay(target);
+    }
+  }, [target]);
+
+  useEffect(() => {
+    if (!active) { setDisplay(target); return; }
+    frame.current = 0;
+    settled.current = 0;
+    cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(scramble);
+    return () => cancelAnimationFrame(raf.current);
+  }, [active, target, scramble]);
+
+  return display;
+}
+
+// ── Recipe 21: typewriter for the terminal block ──────────────────────────────
+const COMMANDS = [
+  "npm run dev",
+  "git push origin main",
+  "vite build --mode prod",
+  "docker compose up -d",
+  "pnpm install --frozen",
+];
+
+function useTypewriter() {
+  const [cmdIndex, setCmdIndex] = useState(0);
+  const [phase, setPhase] = useState<"typing" | "hold" | "erasing">("typing");
+  const [displayed, setDisplayed] = useState("");
+
+  useEffect(() => {
+    const cmd = COMMANDS[cmdIndex];
+    let timer: ReturnType<typeof setTimeout>;
+    if (phase === "typing") {
+      if (displayed.length < cmd.length) {
+        timer = setTimeout(() => setDisplayed(cmd.slice(0, displayed.length + 1)), 60);
+      } else {
+        timer = setTimeout(() => setPhase("hold"), 1800);
+      }
+    } else if (phase === "hold") {
+      timer = setTimeout(() => setPhase("erasing"), 800);
+    } else {
+      if (displayed.length > 0) {
+        timer = setTimeout(() => setDisplayed(displayed.slice(0, -1)), 35);
+      } else {
+        setCmdIndex((i) => (i + 1) % COMMANDS.length);
+        setPhase("typing");
+      }
+    }
+    return () => clearTimeout(timer);
+  }, [displayed, phase, cmdIndex]);
+
+  return displayed;
+}
+
+// ── Recipe 10: mobile menu ────────────────────────────────────────────────────
+// fd-pixel-sidebar-in: transform translate(-100%) → translate(0px), 180ms ease-out
+// fd-fade-in: opacity 0 → 1, 300ms ease
+function MobileMenu({
+  open,
+  onClose,
+  navItems,
+}: {
+  open: boolean;
+  onClose: () => void;
+  navItems: { label: string; href: string }[];
+}) {
+  return (
+    <>
+      {/* Backdrop — fd-fade-in 300ms ease */}
+      <div
+        className={`mobile-backdrop${open ? " open" : ""}`}
+        aria-hidden="true"
+        onClick={onClose}
+      />
+      {/* Sidebar — fd-pixel-sidebar-in 180ms ease-out */}
+      <aside
+        id="nd-sidebar-mobile"
+        className={`mobile-menu${open ? " open" : ""}`}
+        aria-label="Mobile navigation"
+        data-state={open ? "open" : "closed"}
+      >
+        <nav>
+          {navItems.map((item) => (
+            <a key={item.href} href={item.href} onClick={onClose}>
+              {item.label}
+            </a>
+          ))}
+        </nav>
+        <button className="mobile-close" onClick={onClose} aria-label="Close menu">
+          ✕
+        </button>
+      </aside>
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPONENTS
+// ══════════════════════════════════════════════════════════════════════════════
+
 // ── Header ────────────────────────────────────────────────────────────────────
 function Header() {
   const profile = useProfile();
+  const hidden = useHeaderHide();
+  const active = useActiveSection(["home", "about", "projects", "contact"]);
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
-    <header className="site-header">
-      <a className="brand" href="#home" aria-label="Home">
-        <span className="brand-mark">{profile.initials}</span>
-        <span>
-          <strong>{profile.firstName}</strong>
-          <strong>{profile.lastName}</strong>
-        </span>
-      </a>
-      <nav className="nav-links" aria-label="Primary navigation">
-        {profile.navItems.map((item) => (
-          <a key={item.href} href={item.href}>
-            {item.label}
+    <>
+      {/* Recipe 9: transform translateY(-100%) on scroll-down, 180ms cubic-bezier(0.22,1,0.36,1) */}
+      <header
+        className="site-header"
+        style={{
+          transform: hidden ? "translateY(-100%)" : "translateY(0)",
+          transition: "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)",
+        }}
+      >
+        <a className="brand" href="#home" aria-label="Home">
+          <span className="brand-mark">{profile.initials}</span>
+          <span>
+            <strong>{profile.firstName}</strong>{" "}
+            <strong>{profile.lastName}</strong>
+          </span>
+        </a>
+
+        {/* Desktop nav — Recipe 1/13: active-link 150ms cubic-bezier(0.4,0,0.2,1) */}
+        <nav className="nav-links" aria-label="Primary navigation">
+          {profile.navItems.map((item) => {
+            const sectionId = item.href.replace("#", "");
+            const isActive = active === sectionId;
+            return (
+              <a
+                key={item.href}
+                href={item.href}
+                aria-current={isActive ? "page" : undefined}
+                style={{
+                  background: isActive ? "rgba(255,255,255,0.055)" : undefined,
+                  color: isActive ? "rgb(255,255,255)" : undefined,
+                  transition:
+                    "background 150ms cubic-bezier(0.4,0,0.2,1), color 150ms cubic-bezier(0.4,0,0.2,1)",
+                }}
+              >
+                {item.label}
+              </a>
+            );
+          })}
+        </nav>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <a className="talk-button" href="#contact">
+            Get in touch
           </a>
-        ))}
-      </nav>
-      <a className="talk-button" href="#contact">
-        Light Up the Talk
-      </a>
-    </header>
+          {/* Mobile hamburger */}
+          <button
+            className="hamburger"
+            aria-label="Open menu"
+            onClick={() => setMenuOpen(true)}
+          >
+            <span /><span /><span />
+          </button>
+        </div>
+      </header>
+
+      {/* Recipe 10: mobile menu */}
+      <MobileMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        navItems={profile.navItems}
+      />
+    </>
   );
 }
 
@@ -82,57 +316,117 @@ function SocialRail() {
   );
 }
 
-// ── Hero ──────────────────────────────────────────────────────────────────────
-function Hero() {
-  const profile = useProfile();
+// ── Terminal block (Recipes 21 typewriter + blink cursor) ─────────────────────
+function TerminalBlock() {
+  const cmd = useTypewriter();
   return (
-    <main id="home" className="hero">
-      <div className="role-rail" aria-hidden="true">
-        <span />
-        <p>Full Stack</p>
-        <strong>Developer</strong>
-        <span />
-      </div>
-
-      <div className="portrait-wrap" aria-label="Portfolio portrait">
-        <div className="portrait-glow" />
-        <div className="portrait-frame">
-          <DotPortrait
-            image={profile.avatarImage}
-            width={560}
-            height={580}
-            dotSpacing={6}
-            maxDotRadius={4}
-            minDotRadius={0.2}
-            contrast={1.3}
-          />
-        </div>
-        <div className="proof-badge">
-          <p>"{profile.collaborationNote}"</p>
-          <div className="avatar-stack" aria-hidden="true">
-            {["A", "R", "K", "M", "S", "D", "P", "L"].map((item, i) => (
-              <span key={`${item}-${i}`}>{item}</span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <section className="hero-copy" aria-labelledby="hero-title">
-        <p className="eyebrow">{profile.role}</p>
-        <h1 id="hero-title">
-          <span>{profile.firstName}</span>
-          {profile.lastName}
-        </h1>
-        <p className="headline">{profile.headline}</p>
-        <p className="intro">{profile.intro}</p>
-
-      </section>
-    </main>
+    <div className="terminal-block" aria-hidden="true">
+      <span className="terminal-prompt">$</span>
+      <span className="terminal-cmd">{cmd}</span>
+      <span className="terminal-cursor farm-terminal-cursor-blink" />
+    </div>
   );
 }
 
-// ── Section divider ───────────────────────────────────────────────────────────
+// ── Hero ──────────────────────────────────────────────────────────────────────
+// Recipe 23: first name scrambles on mount (text-scramble, settles left→right)
+function Hero() {
+  const profile = useProfile();
+  // Start scramble on mount; `active` triggers it
+  const [scrambleActive, setScrambleActive] = useState(false);
+  const scrambledFirst = useScrambleText(profile.firstName, scrambleActive);
 
+  useEffect(() => {
+    // Run scramble once on page load, after a short delay (matches farmjs ~948ms enter choreography)
+    const t = setTimeout(() => setScrambleActive(true), 600);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <main id="home" className="hero">
+      <div className="hero-inner">
+        {/* role label */}
+        <div className="role-rail" aria-hidden="true">
+          <span />
+          <p>{profile.role}</p>
+          <span />
+        </div>
+
+        {/* portrait */}
+        <div className="portrait-wrap" aria-label="Portfolio portrait">
+          <div className="portrait-glow" />
+          <div className="portrait-frame">
+            <DotPortrait
+              image={profile.avatarImage}
+              width={320}
+              height={320}
+              dotSpacing={5}
+              maxDotRadius={3}
+              minDotRadius={0.2}
+              contrast={1.3}
+            />
+          </div>
+          <div className="proof-badge">
+            <p>"{profile.collaborationNote}"</p>
+            <div className="avatar-stack" aria-hidden="true">
+              {["A", "R", "K", "M", "S", "D"].map((item, i) => (
+                <span key={`${item}-${i}`}>{item}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* hero copy */}
+        <section className="hero-copy" aria-labelledby="hero-title">
+          <p className="eyebrow">{profile.role}</p>
+
+          {/* Recipe 23: scramble on h1 first name */}
+          <h1 id="hero-title">
+            <span
+              className="hero-scramble"
+              aria-label={profile.firstName}
+            >
+              {scrambledFirst}
+            </span>
+            {" "}{profile.lastName}
+          </h1>
+
+          <p className="headline">{profile.headline}</p>
+          <p className="intro">{profile.intro}</p>
+
+          {/* stat row */}
+          <div className="stat-row font-tabular" aria-label="Quick stats">
+            <div className="stat-card">
+              <strong>{profile.projectCount}</strong>
+              <span>Projects</span>
+            </div>
+            <div className="stat-card">
+              <strong>{profile.teamCount}</strong>
+              <span>Collaborators</span>
+            </div>
+            <div className="stat-card">
+              <strong>{profile.yearsCount}</strong>
+              <span>Years</span>
+            </div>
+          </div>
+
+          {/* Recipe 21: terminal typewriter */}
+          <TerminalBlock />
+
+          {/* actions */}
+          <div className="hero-actions">
+            <a className="talk-button" href="#projects">
+              View work
+            </a>
+            <a className="filled-btn" href="#contact">
+              Say hello
+            </a>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
 
 // ── About ─────────────────────────────────────────────────────────────────────
 function About() {
@@ -185,9 +479,11 @@ function DesktopScreen() {
       <div className="desktop-screen">
         <aside>
           <strong>FoodChe</strong>
-          {["Dashboard", "Orders", "Apps", "Customers", "Stores", "Reports"].map((row) => (
-            <span key={row}>{row}</span>
-          ))}
+          {["Dashboard", "Orders", "Apps", "Customers", "Stores", "Reports"].map(
+            (row) => (
+              <span key={row}>{row}</span>
+            )
+          )}
         </aside>
         <main>
           <div className="screen-topline" />
@@ -197,7 +493,10 @@ function DesktopScreen() {
             ))}
           </div>
           <div className="table-lines">
-            <span /><span /><span /><span />
+            <span />
+            <span />
+            <span />
+            <span />
           </div>
         </main>
       </div>
@@ -217,8 +516,8 @@ function LaptopScreen() {
           <span>Contact</span>
         </nav>
         <section>
-          <p>#1 Food Delivery Service</p>
-          <h3>We deliver your favorite food fresh and fast.</h3>
+          <p>#1 Food Delivery</p>
+          <h3>Fresh and fast.</h3>
           <button>Start order</button>
         </section>
       </div>
@@ -233,9 +532,15 @@ interface PhoneScreenProps {
 }
 
 function PhoneScreen({ size = "large", variant = "grid" }: PhoneScreenProps) {
-  const items = Array.from({ length: variant === "list" ? 5 : 6 }, (_, i) => i);
+  const items = Array.from(
+    { length: variant === "list" ? 5 : 6 },
+    (_, i) => i
+  );
   return (
-    <div className={`device phone-device phone-${size}`} aria-hidden="true">
+    <div
+      className={`device phone-device phone-${size}`}
+      aria-hidden="true"
+    >
       <div className="phone-speaker" />
       <div className={`phone-screen phone-screen-${variant}`}>
         <div className="phone-hero" />
@@ -259,7 +564,6 @@ function ProjectShowcase() {
   function prev() {
     setIndex((i) => (i - 1 + projects.length) % projects.length);
   }
-
   function next() {
     setIndex((i) => (i + 1) % projects.length);
   }
@@ -271,19 +575,18 @@ function ProjectShowcase() {
       aria-labelledby="projects-heading-title"
     >
       <div className="projects-heading">
-        <div className="projects-heading-copy">
-          <h2 id="projects-heading-title">{profile.projectsIntro.title}</h2>
-          <p>
-            <strong>{profile.projectsIntro.lead}</strong>{" "}
-            {profile.projectsIntro.body}
-          </p>
-        </div>
-        <div className="projects-orb" aria-hidden="true">
-          <span>Projects</span>
-        </div>
+        <p className="section-kicker">Projects</p>
+        <h2 id="projects-heading-title">{profile.projectsIntro.title}</h2>
+        <p>
+          <strong>{profile.projectsIntro.lead}</strong>{" "}
+          {profile.projectsIntro.body}
+        </p>
       </div>
 
-      <article className="project-card" aria-label={`Project: ${project.title}`}>
+      <article
+        className="project-card"
+        aria-label={`Project: ${project.title}`}
+      >
         <button
           className="project-arrow project-arrow-left"
           aria-label="Previous project"
@@ -341,7 +644,10 @@ function ProjectShowcase() {
           </div>
         </div>
 
-        <div className="project-tags" aria-label="Project technologies">
+        <div
+          className="project-tags"
+          aria-label="Project technologies"
+        >
           {project.tags.map((tag) => (
             <span key={tag}>{tag}</span>
           ))}
@@ -379,7 +685,9 @@ function Contact() {
           <p className="section-kicker">Contact</p>
           <h2 id="contact-title">{profile.contact.heading}</h2>
           <p>{profile.contact.subheading}</p>
-          <span className="availability-badge">{profile.contact.availability}</span>
+          <span className="availability-badge">
+            {profile.contact.availability}
+          </span>
         </div>
 
         <div className="contact-actions">
@@ -445,7 +753,6 @@ export default function App() {
       </Suspense>
     );
   }
-
   if (hash === "#admin") {
     return (
       <Suspense fallback={null}>
