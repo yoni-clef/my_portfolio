@@ -1,4 +1,11 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  lazy,
+  Suspense,
+} from "react";
 import {
   FaArrowLeft,
   FaArrowRight,
@@ -26,12 +33,107 @@ const socialIcons: Record<string, IconType> = {
   Telegram: FaTelegram,
   Gmail: FaEnvelope,
 };
-
 function getSocialIcon(label: string): IconType | undefined {
   return socialIcons[label];
 }
 
-// ── Typewriter hook ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// MOTION HOOKS  (recipes from design/reference/motion/README.md)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Recipe 9: header hides on scroll-down, reveals on scroll-up ──────────────
+// Trigger: scroll; property: transform; curve: cubic-bezier(0.22,1,0.36,1) 180ms
+function useHeaderHide() {
+  const [hidden, setHidden] = useState(false);
+  const lastY = useRef(0);
+
+  useEffect(() => {
+    function onScroll() {
+      const y = window.scrollY;
+      const delta = y - lastY.current;
+      if (delta > 4 && y > 80) setHidden(true);   // scrolling down → hide
+      else if (delta < -4) setHidden(false);        // scrolling up  → reveal
+      lastY.current = y;
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  return hidden;
+}
+
+// ── Recipe 9 (nav active): active section highlight 150ms cubic-bezier ────────
+function useActiveSection(ids: string[]): string {
+  const [active, setActive] = useState(ids[0] ?? "");
+
+  useEffect(() => {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible.length) setActive(visible[0].target.id);
+      },
+      { threshold: 0.25 }
+    );
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) obs.observe(el);
+    });
+    return () => obs.disconnect();
+  }, [ids]);
+
+  return active;
+}
+
+// ── Recipes 21 & 22: typewriter + text-scramble on heading span ───────────────
+// Recipe 21: plain typewriter (one char at a time)
+// Recipe 22: scramble — show final text with unsettled letters as random chars,
+//            settling left-to-right, one more letter every few frames (~50ms)
+
+const SCRAMBLE_CHARS = "!<>-_\\/[]{}—=+*^?#&%@$";
+
+function useScrambleText(target: string, active: boolean): string {
+  const [display, setDisplay] = useState(target);
+  const frame = useRef(0);
+  const settled = useRef(0);
+  const raf = useRef(0);
+
+  const scramble = useCallback(() => {
+    frame.current++;
+    // settle one letter every 3 frames (~50ms at 60fps)
+    if (frame.current % 3 === 0 && settled.current < target.length) {
+      settled.current++;
+    }
+    const out = target
+      .split("")
+      .map((ch, i) => {
+        if (ch === " ") return " ";
+        if (i < settled.current) return ch;
+        return SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)];
+      })
+      .join("");
+    setDisplay(out);
+    if (settled.current < target.length) {
+      raf.current = requestAnimationFrame(scramble);
+    } else {
+      setDisplay(target);
+    }
+  }, [target]);
+
+  useEffect(() => {
+    if (!active) { setDisplay(target); return; }
+    frame.current = 0;
+    settled.current = 0;
+    cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(scramble);
+    return () => cancelAnimationFrame(raf.current);
+  }, [active, target, scramble]);
+
+  return display;
+}
+
+// ── Recipe 21: typewriter for the terminal block ──────────────────────────────
 const COMMANDS = [
   "npm run dev",
   "git push origin main",
@@ -44,12 +146,10 @@ function useTypewriter() {
   const [cmdIndex, setCmdIndex] = useState(0);
   const [phase, setPhase] = useState<"typing" | "hold" | "erasing">("typing");
   const [displayed, setDisplayed] = useState("");
-  const ref = useRef({ cmdIndex: 0, phase: "typing" as typeof phase });
 
   useEffect(() => {
     const cmd = COMMANDS[cmdIndex];
     let timer: ReturnType<typeof setTimeout>;
-
     if (phase === "typing") {
       if (displayed.length < cmd.length) {
         timer = setTimeout(() => setDisplayed(cmd.slice(0, displayed.length + 1)), 60);
@@ -62,42 +162,132 @@ function useTypewriter() {
       if (displayed.length > 0) {
         timer = setTimeout(() => setDisplayed(displayed.slice(0, -1)), 35);
       } else {
-        const next = (cmdIndex + 1) % COMMANDS.length;
-        setCmdIndex(next);
+        setCmdIndex((i) => (i + 1) % COMMANDS.length);
         setPhase("typing");
       }
     }
-
     return () => clearTimeout(timer);
   }, [displayed, phase, cmdIndex]);
 
   return displayed;
 }
 
+// ── Recipe 10: mobile menu ────────────────────────────────────────────────────
+// fd-pixel-sidebar-in: transform translate(-100%) → translate(0px), 180ms ease-out
+// fd-fade-in: opacity 0 → 1, 300ms ease
+function MobileMenu({
+  open,
+  onClose,
+  navItems,
+}: {
+  open: boolean;
+  onClose: () => void;
+  navItems: { label: string; href: string }[];
+}) {
+  return (
+    <>
+      {/* Backdrop — fd-fade-in 300ms ease */}
+      <div
+        className={`mobile-backdrop${open ? " open" : ""}`}
+        aria-hidden="true"
+        onClick={onClose}
+      />
+      {/* Sidebar — fd-pixel-sidebar-in 180ms ease-out */}
+      <aside
+        id="nd-sidebar-mobile"
+        className={`mobile-menu${open ? " open" : ""}`}
+        aria-label="Mobile navigation"
+        data-state={open ? "open" : "closed"}
+      >
+        <nav>
+          {navItems.map((item) => (
+            <a key={item.href} href={item.href} onClick={onClose}>
+              {item.label}
+            </a>
+          ))}
+        </nav>
+        <button className="mobile-close" onClick={onClose} aria-label="Close menu">
+          ✕
+        </button>
+      </aside>
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPONENTS
+// ══════════════════════════════════════════════════════════════════════════════
+
 // ── Header ────────────────────────────────────────────────────────────────────
 function Header() {
   const profile = useProfile();
+  const hidden = useHeaderHide();
+  const active = useActiveSection(["home", "about", "projects", "contact"]);
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
-    <header className="site-header">
-      <a className="brand" href="#home" aria-label="Home">
-        <span className="brand-mark">{profile.initials}</span>
-        <span>
-          <strong>{profile.firstName}</strong>
-          {" "}
-          <strong>{profile.lastName}</strong>
-        </span>
-      </a>
-      <nav className="nav-links" aria-label="Primary navigation">
-        {profile.navItems.map((item) => (
-          <a key={item.href} href={item.href}>
-            {item.label}
+    <>
+      {/* Recipe 9: transform translateY(-100%) on scroll-down, 180ms cubic-bezier(0.22,1,0.36,1) */}
+      <header
+        className="site-header"
+        style={{
+          transform: hidden ? "translateY(-100%)" : "translateY(0)",
+          transition: "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)",
+        }}
+      >
+        <a className="brand" href="#home" aria-label="Home">
+          <span className="brand-mark">{profile.initials}</span>
+          <span>
+            <strong>{profile.firstName}</strong>{" "}
+            <strong>{profile.lastName}</strong>
+          </span>
+        </a>
+
+        {/* Desktop nav — Recipe 1/13: active-link 150ms cubic-bezier(0.4,0,0.2,1) */}
+        <nav className="nav-links" aria-label="Primary navigation">
+          {profile.navItems.map((item) => {
+            const sectionId = item.href.replace("#", "");
+            const isActive = active === sectionId;
+            return (
+              <a
+                key={item.href}
+                href={item.href}
+                aria-current={isActive ? "page" : undefined}
+                style={{
+                  background: isActive ? "rgba(255,255,255,0.055)" : undefined,
+                  color: isActive ? "rgb(255,255,255)" : undefined,
+                  transition:
+                    "background 150ms cubic-bezier(0.4,0,0.2,1), color 150ms cubic-bezier(0.4,0,0.2,1)",
+                }}
+              >
+                {item.label}
+              </a>
+            );
+          })}
+        </nav>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <a className="talk-button" href="#contact">
+            Get in touch
           </a>
-        ))}
-      </nav>
-      <a className="talk-button" href="#contact">
-        Get in touch
-      </a>
-    </header>
+          {/* Mobile hamburger */}
+          <button
+            className="hamburger"
+            aria-label="Open menu"
+            onClick={() => setMenuOpen(true)}
+          >
+            <span /><span /><span />
+          </button>
+        </div>
+      </header>
+
+      {/* Recipe 10: mobile menu */}
+      <MobileMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        navItems={profile.navItems}
+      />
+    </>
   );
 }
 
@@ -126,7 +316,7 @@ function SocialRail() {
   );
 }
 
-// ── Terminal block ────────────────────────────────────────────────────────────
+// ── Terminal block (Recipes 21 typewriter + blink cursor) ─────────────────────
 function TerminalBlock() {
   const cmd = useTypewriter();
   return (
@@ -139,8 +329,19 @@ function TerminalBlock() {
 }
 
 // ── Hero ──────────────────────────────────────────────────────────────────────
+// Recipe 23: first name scrambles on mount (text-scramble, settles left→right)
 function Hero() {
   const profile = useProfile();
+  // Start scramble on mount; `active` triggers it
+  const [scrambleActive, setScrambleActive] = useState(false);
+  const scrambledFirst = useScrambleText(profile.firstName, scrambleActive);
+
+  useEffect(() => {
+    // Run scramble once on page load, after a short delay (matches farmjs ~948ms enter choreography)
+    const t = setTimeout(() => setScrambleActive(true), 600);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <main id="home" className="hero">
       <div className="hero-inner">
@@ -178,10 +379,18 @@ function Hero() {
         {/* hero copy */}
         <section className="hero-copy" aria-labelledby="hero-title">
           <p className="eyebrow">{profile.role}</p>
+
+          {/* Recipe 23: scramble on h1 first name */}
           <h1 id="hero-title">
-            <span>{profile.firstName}</span>
+            <span
+              className="hero-scramble"
+              aria-label={profile.firstName}
+            >
+              {scrambledFirst}
+            </span>
             {" "}{profile.lastName}
           </h1>
+
           <p className="headline">{profile.headline}</p>
           <p className="intro">{profile.intro}</p>
 
@@ -201,7 +410,7 @@ function Hero() {
             </div>
           </div>
 
-          {/* terminal typewriter */}
+          {/* Recipe 21: terminal typewriter */}
           <TerminalBlock />
 
           {/* actions */}
@@ -270,9 +479,11 @@ function DesktopScreen() {
       <div className="desktop-screen">
         <aside>
           <strong>FoodChe</strong>
-          {["Dashboard", "Orders", "Apps", "Customers", "Stores", "Reports"].map((row) => (
-            <span key={row}>{row}</span>
-          ))}
+          {["Dashboard", "Orders", "Apps", "Customers", "Stores", "Reports"].map(
+            (row) => (
+              <span key={row}>{row}</span>
+            )
+          )}
         </aside>
         <main>
           <div className="screen-topline" />
@@ -282,7 +493,10 @@ function DesktopScreen() {
             ))}
           </div>
           <div className="table-lines">
-            <span /><span /><span /><span />
+            <span />
+            <span />
+            <span />
+            <span />
           </div>
         </main>
       </div>
@@ -318,9 +532,15 @@ interface PhoneScreenProps {
 }
 
 function PhoneScreen({ size = "large", variant = "grid" }: PhoneScreenProps) {
-  const items = Array.from({ length: variant === "list" ? 5 : 6 }, (_, i) => i);
+  const items = Array.from(
+    { length: variant === "list" ? 5 : 6 },
+    (_, i) => i
+  );
   return (
-    <div className={`device phone-device phone-${size}`} aria-hidden="true">
+    <div
+      className={`device phone-device phone-${size}`}
+      aria-hidden="true"
+    >
       <div className="phone-speaker" />
       <div className={`phone-screen phone-screen-${variant}`}>
         <div className="phone-hero" />
@@ -344,7 +564,6 @@ function ProjectShowcase() {
   function prev() {
     setIndex((i) => (i - 1 + projects.length) % projects.length);
   }
-
   function next() {
     setIndex((i) => (i + 1) % projects.length);
   }
@@ -364,7 +583,10 @@ function ProjectShowcase() {
         </p>
       </div>
 
-      <article className="project-card" aria-label={`Project: ${project.title}`}>
+      <article
+        className="project-card"
+        aria-label={`Project: ${project.title}`}
+      >
         <button
           className="project-arrow project-arrow-left"
           aria-label="Previous project"
@@ -422,7 +644,10 @@ function ProjectShowcase() {
           </div>
         </div>
 
-        <div className="project-tags" aria-label="Project technologies">
+        <div
+          className="project-tags"
+          aria-label="Project technologies"
+        >
           {project.tags.map((tag) => (
             <span key={tag}>{tag}</span>
           ))}
@@ -460,7 +685,9 @@ function Contact() {
           <p className="section-kicker">Contact</p>
           <h2 id="contact-title">{profile.contact.heading}</h2>
           <p>{profile.contact.subheading}</p>
-          <span className="availability-badge">{profile.contact.availability}</span>
+          <span className="availability-badge">
+            {profile.contact.availability}
+          </span>
         </div>
 
         <div className="contact-actions">
@@ -526,7 +753,6 @@ export default function App() {
       </Suspense>
     );
   }
-
   if (hash === "#admin") {
     return (
       <Suspense fallback={null}>
