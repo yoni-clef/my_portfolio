@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import {
   FaArrowLeft,
   FaArrowRight,
@@ -31,6 +31,49 @@ function getSocialIcon(label: string): IconType | undefined {
   return socialIcons[label];
 }
 
+// ── Typewriter hook ────────────────────────────────────────────────────────────
+const COMMANDS = [
+  "npm run dev",
+  "git push origin main",
+  "vite build --mode prod",
+  "docker compose up -d",
+  "pnpm install --frozen",
+];
+
+function useTypewriter() {
+  const [cmdIndex, setCmdIndex] = useState(0);
+  const [phase, setPhase] = useState<"typing" | "hold" | "erasing">("typing");
+  const [displayed, setDisplayed] = useState("");
+  const ref = useRef({ cmdIndex: 0, phase: "typing" as typeof phase });
+
+  useEffect(() => {
+    const cmd = COMMANDS[cmdIndex];
+    let timer: ReturnType<typeof setTimeout>;
+
+    if (phase === "typing") {
+      if (displayed.length < cmd.length) {
+        timer = setTimeout(() => setDisplayed(cmd.slice(0, displayed.length + 1)), 60);
+      } else {
+        timer = setTimeout(() => setPhase("hold"), 1800);
+      }
+    } else if (phase === "hold") {
+      timer = setTimeout(() => setPhase("erasing"), 800);
+    } else {
+      if (displayed.length > 0) {
+        timer = setTimeout(() => setDisplayed(displayed.slice(0, -1)), 35);
+      } else {
+        const next = (cmdIndex + 1) % COMMANDS.length;
+        setCmdIndex(next);
+        setPhase("typing");
+      }
+    }
+
+    return () => clearTimeout(timer);
+  }, [displayed, phase, cmdIndex]);
+
+  return displayed;
+}
+
 // ── Header ────────────────────────────────────────────────────────────────────
 function Header() {
   const profile = useProfile();
@@ -40,6 +83,7 @@ function Header() {
         <span className="brand-mark">{profile.initials}</span>
         <span>
           <strong>{profile.firstName}</strong>
+          {" "}
           <strong>{profile.lastName}</strong>
         </span>
       </a>
@@ -51,7 +95,7 @@ function Header() {
         ))}
       </nav>
       <a className="talk-button" href="#contact">
-        Light Up the Talk
+        Get in touch
       </a>
     </header>
   );
@@ -82,57 +126,98 @@ function SocialRail() {
   );
 }
 
+// ── Terminal block ────────────────────────────────────────────────────────────
+function TerminalBlock() {
+  const cmd = useTypewriter();
+  return (
+    <div className="terminal-block" aria-hidden="true">
+      <span className="terminal-prompt">$</span>
+      <span className="terminal-cmd">{cmd}</span>
+      <span className="terminal-cursor farm-terminal-cursor-blink" />
+    </div>
+  );
+}
+
 // ── Hero ──────────────────────────────────────────────────────────────────────
 function Hero() {
   const profile = useProfile();
   return (
     <main id="home" className="hero">
-      <div className="role-rail" aria-hidden="true">
-        <span />
-        <p>Full Stack</p>
-        <strong>Developer</strong>
-        <span />
-      </div>
-
-      <div className="portrait-wrap" aria-label="Portfolio portrait">
-        <div className="portrait-glow" />
-        <div className="portrait-frame">
-          <DotPortrait
-            image={profile.avatarImage}
-            width={560}
-            height={580}
-            dotSpacing={6}
-            maxDotRadius={4}
-            minDotRadius={0.2}
-            contrast={1.3}
-          />
+      <div className="hero-inner">
+        {/* role label */}
+        <div className="role-rail" aria-hidden="true">
+          <span />
+          <p>{profile.role}</p>
+          <span />
         </div>
-        <div className="proof-badge">
-          <p>"{profile.collaborationNote}"</p>
-          <div className="avatar-stack" aria-hidden="true">
-            {["A", "R", "K", "M", "S", "D", "P", "L"].map((item, i) => (
-              <span key={`${item}-${i}`}>{item}</span>
-            ))}
+
+        {/* portrait */}
+        <div className="portrait-wrap" aria-label="Portfolio portrait">
+          <div className="portrait-glow" />
+          <div className="portrait-frame">
+            <DotPortrait
+              image={profile.avatarImage}
+              width={320}
+              height={320}
+              dotSpacing={5}
+              maxDotRadius={3}
+              minDotRadius={0.2}
+              contrast={1.3}
+            />
+          </div>
+          <div className="proof-badge">
+            <p>"{profile.collaborationNote}"</p>
+            <div className="avatar-stack" aria-hidden="true">
+              {["A", "R", "K", "M", "S", "D"].map((item, i) => (
+                <span key={`${item}-${i}`}>{item}</span>
+              ))}
+            </div>
           </div>
         </div>
+
+        {/* hero copy */}
+        <section className="hero-copy" aria-labelledby="hero-title">
+          <p className="eyebrow">{profile.role}</p>
+          <h1 id="hero-title">
+            <span>{profile.firstName}</span>
+            {" "}{profile.lastName}
+          </h1>
+          <p className="headline">{profile.headline}</p>
+          <p className="intro">{profile.intro}</p>
+
+          {/* stat row */}
+          <div className="stat-row font-tabular" aria-label="Quick stats">
+            <div className="stat-card">
+              <strong>{profile.projectCount}</strong>
+              <span>Projects</span>
+            </div>
+            <div className="stat-card">
+              <strong>{profile.teamCount}</strong>
+              <span>Collaborators</span>
+            </div>
+            <div className="stat-card">
+              <strong>{profile.yearsCount}</strong>
+              <span>Years</span>
+            </div>
+          </div>
+
+          {/* terminal typewriter */}
+          <TerminalBlock />
+
+          {/* actions */}
+          <div className="hero-actions">
+            <a className="talk-button" href="#projects">
+              View work
+            </a>
+            <a className="filled-btn" href="#contact">
+              Say hello
+            </a>
+          </div>
+        </section>
       </div>
-
-      <section className="hero-copy" aria-labelledby="hero-title">
-        <p className="eyebrow">{profile.role}</p>
-        <h1 id="hero-title">
-          <span>{profile.firstName}</span>
-          {profile.lastName}
-        </h1>
-        <p className="headline">{profile.headline}</p>
-        <p className="intro">{profile.intro}</p>
-
-      </section>
     </main>
   );
 }
-
-// ── Section divider ───────────────────────────────────────────────────────────
-
 
 // ── About ─────────────────────────────────────────────────────────────────────
 function About() {
@@ -217,8 +302,8 @@ function LaptopScreen() {
           <span>Contact</span>
         </nav>
         <section>
-          <p>#1 Food Delivery Service</p>
-          <h3>We deliver your favorite food fresh and fast.</h3>
+          <p>#1 Food Delivery</p>
+          <h3>Fresh and fast.</h3>
           <button>Start order</button>
         </section>
       </div>
@@ -271,16 +356,12 @@ function ProjectShowcase() {
       aria-labelledby="projects-heading-title"
     >
       <div className="projects-heading">
-        <div className="projects-heading-copy">
-          <h2 id="projects-heading-title">{profile.projectsIntro.title}</h2>
-          <p>
-            <strong>{profile.projectsIntro.lead}</strong>{" "}
-            {profile.projectsIntro.body}
-          </p>
-        </div>
-        <div className="projects-orb" aria-hidden="true">
-          <span>Projects</span>
-        </div>
+        <p className="section-kicker">Projects</p>
+        <h2 id="projects-heading-title">{profile.projectsIntro.title}</h2>
+        <p>
+          <strong>{profile.projectsIntro.lead}</strong>{" "}
+          {profile.projectsIntro.body}
+        </p>
       </div>
 
       <article className="project-card" aria-label={`Project: ${project.title}`}>
